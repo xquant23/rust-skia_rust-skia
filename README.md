@@ -122,6 +122,8 @@ The build system for Skia. `ninja` is available as a binary package on all major
 
 Cross compilation to Android is supported for targeting 64 bit ARM and Intel x86 architectures (`aarch64` and `x86_64`) for API Level 26 (Oreo, Android 8):
 
+To build for a higher API level, set `SKIA_ANDROID_API_LEVEL` to the level of the clang wrapper in `CC` and `CXX` (for example `36` for `aarch64-linux-android36-clang`).
+
 We recommend to use [cargo apk](https://crates.io/crates/cargo-apk), but if that does not work for you, following are some instructions on how we build Android targets with GitHub Actions:
 
 For example, to compile for `aarch64`:

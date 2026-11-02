@@ -7,7 +7,19 @@ use super::prelude::*;
 pub struct Android;
 
 /// API level Android 8, Oreo (the first one with full Vulkan support)
-const API_LEVEL: &str = "26";
+const DEFAULT_API_LEVEL: u32 = 26;
+
+/// The API level from `SKIA_ANDROID_API_LEVEL`, or [`DEFAULT_API_LEVEL`].
+///
+/// Skia, the bindings and the app that links them should use the same level, so that all of them
+/// import the NDK symbols of that level.
+fn api_level() -> u32 {
+    cargo::env_var("SKIA_ANDROID_API_LEVEL").map_or(DEFAULT_API_LEVEL, |level| {
+        level
+            .parse()
+            .unwrap_or_else(|_| panic!("SKIA_ANDROID_API_LEVEL is not an API level: {level}"))
+    })
+}
 
 impl PlatformDetails for Android {
     fn uses_freetype(&self) -> bool {
@@ -21,30 +33,24 @@ impl PlatformDetails for Android {
 
         builder
             .arg("ndk", quote(&ndk))
-            .arg("ndk_api", API_LEVEL)
+            .arg("ndk_api", api_level().to_string())
             .arg("target_cpu", quote(clang::target_arch(arch)))
             .arg("skia_enable_fontmgr_android", yes());
 
         builder.target(clang_target(&config.target));
 
         let major = ndk_major_version(Path::new(&ndk));
-        let mut extra_skia_cflags = extra_skia_cflags();
 
         // Version 23 is the first version using llvm 12
         // https://github.com/android/ndk/wiki/Changelog-r23#r23b
         // https://releases.llvm.org/12.0.0/tools/clang/docs/ReleaseNotes.html#new-compiler-flags
         if major >= 23 && arch == "aarch64" {
-            extra_skia_cflags.push("-mno-outline-atomics".to_string());
+            builder.cflag("-mno-outline-atomics");
         }
-
-        builder.cflags(extra_skia_cflags);
     }
 
     fn bindgen_args(&self, target: &Target, builder: &mut BindgenArgsBuilder) {
-        builder.args(additional_clang_args(
-            &target.to_string(),
-            &target.architecture,
-        ));
+        builder.args(additional_clang_args(&target.architecture));
         // Must be an override: `skia_bindgen` appends the plain target after the platform args.
         builder.override_target(&clang_target(target));
     }
@@ -73,13 +79,13 @@ impl PlatformDetails for Android {
 ///
 /// Our `--target` overrides the one set by the NDK's versioned clang wrapper. Without a level,
 /// clang leaves `__ANDROID_MIN_SDK_VERSION__` undefined, and newer NDK headers then hide every
-/// API above level 0 (e.g. `posix_madvise`).
+/// API above level 0 (e.g. `posix_madvise`). The level also defines `__ANDROID_API__`.
 fn clang_target(target: &Target) -> String {
     let target = target.to_string();
     if target.ends_with(|c: char| c.is_ascii_digit()) {
         target
     } else {
-        format!("{target}{API_LEVEL}")
+        format!("{target}{}", api_level())
     }
 }
 
@@ -120,7 +126,7 @@ fn ndk_major_version(ndk_dir: &Path) -> u32 {
     captures[1].parse().expect("could not parse major version")
 }
 
-pub fn additional_clang_args(target: &str, target_arch: &str) -> Vec<String> {
+pub fn additional_clang_args(target_arch: &str) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
 
     match target_arch {
@@ -145,14 +151,7 @@ pub fn additional_clang_args(target: &str, target_arch: &str) -> Vec<String> {
         args.push(format!("--sysroot={host_toolchain}/sysroot"));
     };
     args.push(format!("-I{ndk}/sources/android/cpufeatures"));
-
-    args.push(format!("--target={target}"));
-    args.extend(extra_skia_cflags());
     args
-}
-
-pub fn extra_skia_cflags() -> Vec<String> {
-    vec![format!("-D__ANDROID_API__={API_LEVEL}")]
 }
 
 pub fn link_libraries(features: &Features) -> Vec<&str> {
